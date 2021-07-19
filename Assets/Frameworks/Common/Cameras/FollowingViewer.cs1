@@ -1,0 +1,143 @@
+using UnityEngine;
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace Frameworks.Common
+{
+	public class FollowingViewer : MonoBehaviour
+	{
+		#region UI Param
+		public GameObject	FollowObj = null;
+
+		public Camera		FollowCamera = null;
+
+		public Vector2		FollowXYOffset = Vector2.left;
+		public float		FollowDistance = 1.0f;
+
+		public Vector3		FollowPos	 	= Vector3.zero;
+		public Vector3		LastFollowPos	= Vector3.zero;
+
+		public float		HorizontalAngle = 0.0f;
+
+		public float		VerticalAngle	= 0.0f;
+		#endregion
+
+		Vector3 FollowTargetPos = Vector3.zero;
+
+		public Vector3 FollowMinVelocity	= Vector3.one;
+
+		public float FollowAngleSpeed	= 1.0f;
+
+		public float MaxFollowTime	= 1.0f;
+
+		Quaternion TargetRotation = Quaternion.identity;
+
+		public void UpdatePosition_old(float deltaTime)
+		{
+			if (FollowObj != null)
+			{
+				FollowPos = FollowObj.transform.position;
+			}
+
+			TargetRotation = Quaternion.Euler(VerticalAngle, HorizontalAngle, 0);
+
+			Vector3 curOffset = TargetRotation * (Vector3.back * FollowDistance) + (Vector3)FollowXYOffset;
+
+			FollowTargetPos =  FollowPos + curOffset;
+
+			Vector3 curPos			= transform.position;
+			Quaternion curRotation	= transform.rotation;
+
+			var xDistance = Mathf.Abs(FollowTargetPos.x - curPos.x);
+			var yDistance = Mathf.Abs(FollowTargetPos.y - curPos.y);
+			var zDistance = Mathf.Abs(FollowTargetPos.z - curPos.z);
+
+			var xSpeed = xDistance / MaxFollowTime;
+			var ySpeed = yDistance / MaxFollowTime;
+			var zSpeed = zDistance / MaxFollowTime;
+
+			xSpeed = xSpeed < FollowMinVelocity.x ?  FollowMinVelocity.x : xSpeed;
+			ySpeed = ySpeed < FollowMinVelocity.y ?  FollowMinVelocity.y : ySpeed;
+			zSpeed = zSpeed < FollowMinVelocity.z ?  FollowMinVelocity.z : zSpeed;
+
+			curPos.x = xDistance < xSpeed * deltaTime ? FollowTargetPos.x : Mathf.Lerp(curPos.x, FollowTargetPos.x, xSpeed * deltaTime / xDistance);
+			curPos.y = yDistance < ySpeed * deltaTime ? FollowTargetPos.y : Mathf.Lerp(curPos.y, FollowTargetPos.y, ySpeed * deltaTime / yDistance);
+			curPos.z = zDistance < zSpeed * deltaTime ? FollowTargetPos.z : Mathf.Lerp(curPos.z, FollowTargetPos.z, zSpeed * deltaTime / zDistance);
+
+			float angleOffset = Quaternion.Angle( curRotation, TargetRotation);
+			var angleSpeed = angleOffset / MaxFollowTime;
+
+			angleSpeed = angleSpeed < FollowAngleSpeed ? FollowAngleSpeed : angleSpeed;
+
+			curRotation = angleOffset < FollowAngleSpeed * deltaTime ? TargetRotation : Quaternion.Lerp(curRotation, TargetRotation, angleSpeed * deltaTime / angleOffset);
+
+
+			transform.SetPositionAndRotation( curPos, curRotation);
+		}
+
+		public void UpdatePosition_1(float deltaTime)
+		{
+			if (FollowObj != null)
+			{
+				FollowPos = FollowObj.transform.position;
+			}
+
+			TargetRotation = Quaternion.Euler(VerticalAngle, HorizontalAngle, 0);
+
+			Quaternion curRotation = transform.rotation;
+
+			float angleOffset = Quaternion.Angle(curRotation, TargetRotation);
+			var angleSpeed = angleOffset / MaxFollowTime;
+
+			angleSpeed = angleSpeed < FollowAngleSpeed ? FollowAngleSpeed : angleSpeed;
+
+			curRotation = angleOffset < FollowAngleSpeed * deltaTime ? TargetRotation : Quaternion.Lerp(curRotation, TargetRotation, angleSpeed * deltaTime / angleOffset);
+
+			Vector3 curOffset = curRotation * (Vector3.back * FollowDistance) + (Vector3)FollowXYOffset;
+
+			FollowTargetPos = FollowPos + curOffset;
+
+			// TO DO Take the current offset of position and rotator it to the new angle
+
+			Vector3 curPos = transform.position;
+
+			var xDistance = Mathf.Abs(FollowTargetPos.x - curPos.x);
+			var yDistance = Mathf.Abs(FollowTargetPos.y - curPos.y);
+			var zDistance = Mathf.Abs(FollowTargetPos.z - curPos.z);
+
+			var xSpeed = xDistance / MaxFollowTime;
+			var ySpeed = yDistance / MaxFollowTime;
+			var zSpeed = zDistance / MaxFollowTime;
+
+			xSpeed = xSpeed < FollowMinVelocity.x ? FollowMinVelocity.x : xSpeed;
+			ySpeed = ySpeed < FollowMinVelocity.y ? FollowMinVelocity.y : ySpeed;
+			zSpeed = zSpeed < FollowMinVelocity.z ? FollowMinVelocity.z : zSpeed;
+
+			curPos.x = xDistance < xSpeed * deltaTime ? FollowTargetPos.x : Mathf.Lerp(curPos.x, FollowTargetPos.x, xSpeed * deltaTime / xDistance);
+			curPos.y = yDistance < ySpeed * deltaTime ? FollowTargetPos.y : Mathf.Lerp(curPos.y, FollowTargetPos.y, ySpeed * deltaTime / yDistance);
+			curPos.z = zDistance < zSpeed * deltaTime ? FollowTargetPos.z : Mathf.Lerp(curPos.z, FollowTargetPos.z, zSpeed * deltaTime / zDistance);
+
+			transform.SetPositionAndRotation(curPos, curRotation);
+
+
+		}
+
+		public void UpdatePosition(float deltaTime)
+		{
+			if (FollowObj != null)
+			{
+				FollowPos = FollowObj.transform.position;
+			}
+
+			TargetRotation = Quaternion.Euler(VerticalAngle, HorizontalAngle, 0);
+
+			var curAngle = transform.rotation.eulerAngles;
+		}
+
+		private void Update()
+		{
+			UpdatePosition(Time.deltaTime);
+		}
+	}
+}

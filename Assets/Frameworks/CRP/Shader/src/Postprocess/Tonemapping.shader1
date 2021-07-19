@@ -1,0 +1,8 @@
+﻿//Shader"Hidden/CustomRenderPipeline/Tonemapping"
+//{
+//    SubShader
+//    {
+//        Tags { "RenderType" = "Opaque" "RenderPipeline" = "CustomRenderPipeline"}
+//        LOD 100
+//    }
+//}

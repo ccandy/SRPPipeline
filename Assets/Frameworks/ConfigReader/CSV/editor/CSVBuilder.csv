@@ -1,0 +1,4 @@
+CSVName,CSVPath,CSPath,IsUseKey,KeyNum,IsBuildResourceCreateFunction,IsBuildMemoryCreateFunction,IsBuildNewFunction
+The name of csv.,Csv file path.,Build .cs file path.,,,,,
+String,String,String,Bool,Int,Bool,Bool,Bool
+PlayerInfo.csv,/Users/wurunhua/Documents/Work/MagicFighter/GameData/PlayerInfo.csv,/Users/wurunhua/Documents/Work/MagicFighter/Assets/Scripts/GameLogic/PlayerInfo.cs,0,0,1,1,

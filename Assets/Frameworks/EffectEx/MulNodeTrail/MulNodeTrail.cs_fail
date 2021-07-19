@@ -1,0 +1,380 @@
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class MulNodeTrail : MonoBehaviour
+{
+	[System.Serializable]
+	public class ControlNodeData
+	{
+		public Vector3 CreateOffset		= Vector3.zero;
+		public Vector3 Velocity			= Vector3.zero;
+		public Vector3 Accelerate		= Vector3.zero;
+	}
+
+	[System.Serializable]
+	public class NodeData
+	{
+		public Vector3	Position		= Vector3.zero;
+		public Vector3	Velocity		= Vector3.zero;
+		public Vector3	Accelerate		= Vector3.zero;
+		public float	LenToLastNode	= 0.0f;
+	}
+
+	[System.Serializable]
+	public class FrameData
+	{
+		public float			PassTime			= 0.0f;
+		public List<NodeData>	FrameNodeData		= new List<NodeData>();
+	}
+
+	public class NodeSmoothInfo
+	{
+		public float	TotalLength = 0.0f;
+		public float	PerLen		= 0.0f;
+
+		public float	PassLen		= 0.0f;
+		public int		NextIndex	= 1;
+		public void Reset()
+		{
+			TotalLength	= 0.0f;
+			PerLen		= 0.0f;
+			PassLen		= 0.0f;
+			NextIndex	= 1;
+		}
+	}
+
+	Mesh			m_TrailMesh			= null;
+
+	List<Vector3>	m_Vertices;
+	List<Vector2>	m_UVs;
+	List<Color>		m_Colors;
+	List<int>		m_Indices;
+
+	int				m_ControlNodeNum	= 2;
+	int				m_FrameNum			= 80;
+	int				m_MeshSlice			= 80;
+
+	public bool		IsLocalPhysicData	= true;
+
+	public bool		IsCalNormal			= true;
+	public float	FPS					= 60.0f;
+	float			m_LastFramePassTime = 10000.0f;
+
+	List<NodeSmoothInfo> m_NodeSmoothInfos = new List<NodeSmoothInfo>();
+
+	public List<ControlNodeData> m_ControlNodes;
+
+	List<FrameData> m_FrameNodes;
+
+	public MeshFilter m_MeshFilter;
+
+	int BeginIndex = 0;
+
+	void InitMesh()
+	{
+		if (m_TrailMesh == null)
+		{
+			m_TrailMesh = new Mesh();
+		}
+
+		m_TrailMesh.Clear();
+
+		m_ControlNodeNum = m_ControlNodes == null ? 0 : m_ControlNodes.Count;
+
+		m_NodeSmoothInfos.Clear();
+
+		for (int i = 0; i < m_ControlNodeNum; ++i)
+		{
+			m_NodeSmoothInfos.Add(new NodeSmoothInfo());
+		}
+
+		int verticesNum = m_ControlNodeNum * m_MeshSlice;
+		int indicesNum	= 6 * m_ControlNodeNum * m_MeshSlice;
+
+		m_FrameNodes = new List<FrameData>(m_FrameNum);
+
+		m_Vertices	= new List<Vector3>(verticesNum);
+
+		m_UVs		= new List<Vector2>(verticesNum);
+		m_Colors	= new List<Color>(verticesNum);
+
+		for (int i = 0; i < verticesNum; ++i)
+		{
+			m_Vertices.Add(Vector3.zero);
+			m_UVs.Add(Vector2.zero);
+			m_Colors.Add(Color.white);
+		}
+
+		m_Indices	= new List<int>(indicesNum);
+
+		for (int nodeIndex = 0; nodeIndex < m_ControlNodeNum - 1; ++nodeIndex)
+		{
+
+			for (int sliceIndex = 0; sliceIndex < m_MeshSlice - 1; ++sliceIndex)
+			{
+				int i0 = (m_MeshSlice * nodeIndex + sliceIndex);
+				int i1 = (m_MeshSlice * nodeIndex + sliceIndex + 1);
+				int i2 = (m_MeshSlice * (nodeIndex + 1) + sliceIndex);
+				int i3 = (m_MeshSlice * (nodeIndex + 1) + sliceIndex + 1);
+
+				m_Indices.Add(i0);
+				m_Indices.Add(i1);
+				m_Indices.Add(i2);
+				m_Indices.Add(i1);
+				m_Indices.Add(i3);
+				m_Indices.Add(i2);
+			}
+		}
+
+
+		m_TrailMesh.SetVertices(m_Vertices);
+		m_TrailMesh.SetUVs(0,m_UVs);
+		m_TrailMesh.SetColors(m_Colors);
+		m_TrailMesh.SetTriangles(m_Indices, 0);
+
+		if (IsCalNormal)
+			m_TrailMesh.RecalculateNormals();
+
+		m_TrailMesh.RecalculateBounds();
+
+	}
+
+	void OnEnable()
+	{
+		InitMesh();
+		if (m_MeshFilter != null)
+		{
+			m_MeshFilter.sharedMesh = m_TrailMesh;
+		}
+	}
+
+	void Update()
+	{
+		BuildCurFrameData();
+		UpdateFrameData();
+		UpdateMesh();
+	}
+
+	void BuildCurFrameData()
+	{
+		m_LastFramePassTime += Time.deltaTime;
+
+		float TimeInv = FPS >= float.Epsilon ? float.Epsilon : 1.0f / FPS;
+
+		if (m_LastFramePassTime < TimeInv)
+			return;
+
+		if (BeginIndex >= m_FrameNodes.Count)
+			m_FrameNodes.Add(new FrameData());
+
+		var curFrame = m_FrameNodes[BeginIndex];
+
+		curFrame.PassTime = 0.0f;
+
+		if (curFrame.FrameNodeData.Count != m_ControlNodeNum)
+		{
+			curFrame.FrameNodeData.Clear();
+			for (int i = 0; i < m_ControlNodeNum; ++i)
+				curFrame.FrameNodeData.Add(new NodeData());
+		}
+
+		Vector3 curTransformPos = transform.localPosition;
+
+		if (IsLocalPhysicData)
+		{
+			for (int i = 0; i < m_ControlNodeNum; ++i)
+			{
+				curFrame.FrameNodeData[i].Position		= transform.TransformPoint(m_ControlNodes[i].CreateOffset + curTransformPos);
+				curFrame.FrameNodeData[i].Velocity		= transform.TransformVector(m_ControlNodes[i].Velocity);
+				curFrame.FrameNodeData[i].Accelerate	= transform.TransformVector(m_ControlNodes[i].Accelerate);
+				curFrame.FrameNodeData[i].LenToLastNode = 0.0f;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < m_ControlNodeNum; ++i)
+			{
+				curFrame.FrameNodeData[i].Position		= transform.TransformPoint(m_ControlNodes[i].CreateOffset + curTransformPos);
+				curFrame.FrameNodeData[i].Velocity		= m_ControlNodes[i].Velocity;
+				curFrame.FrameNodeData[i].Accelerate	= m_ControlNodes[i].Accelerate;
+				curFrame.FrameNodeData[i].LenToLastNode = 0.0f;
+			}
+		}
+
+
+		++BeginIndex;
+		BeginIndex %= m_FrameNum;
+
+		m_LastFramePassTime = Mathf.Repeat(m_LastFramePassTime, TimeInv);
+	}
+
+	void UpdateFrameData()
+	{
+		for (int i = 0; i < m_NodeSmoothInfos.Count; ++i)
+		{
+			m_NodeSmoothInfos[i].Reset();
+		}
+
+		float deltaTime = Time.deltaTime;
+		for (int frameIndex = 1; frameIndex < m_FrameNodes.Count; ++frameIndex)
+		{
+			var frameData = m_FrameNodes[(BeginIndex + frameIndex)% m_FrameNodes.Count];
+			var lastFrameData = m_FrameNodes[(BeginIndex + frameIndex - 1) % m_FrameNodes.Count];
+
+			frameData.PassTime += deltaTime;
+
+			for (int i = 0; i < frameData.FrameNodeData.Count; ++i)
+			{
+				var nodeData		= frameData.FrameNodeData[i];
+				var lastNodeData	= lastFrameData.FrameNodeData[i];
+
+				nodeData.Position += deltaTime * nodeData.Velocity + 0.5f * nodeData.Accelerate * deltaTime * deltaTime;
+				nodeData.Velocity += nodeData.Accelerate * deltaTime;
+				nodeData.LenToLastNode = (nodeData.Position - lastNodeData.Position).magnitude;
+				m_NodeSmoothInfos[i].TotalLength += nodeData.LenToLastNode;
+			}
+		}
+	}
+
+	#region Temp Data reduce GC
+	Vector3 position = Vector3.zero;
+	Vector2 CurPer = Vector2.zero;
+	#endregion
+
+	//FrameData GetFrameDateInLimit(int FrameIndex, out int outputIndex)
+	//{
+	//	if (FrameIndex >= m_FrameNodes.Count)
+	//	{
+	//		outputIndex = m_FrameNodes.Count - 1;
+	//		return m_FrameNodes[(BeginIndex + m_FrameNodes.Count - 1) % m_FrameNodes.Count];
+	//	}
+
+	//	if (FrameIndex < 0)
+	//	{
+	//		outputIndex = 0;
+	//		return m_FrameNodes[BeginIndex % m_FrameNodes.Count];
+	//	}
+
+	//	outputIndex = FrameIndex;
+	//	return m_FrameNodes[(BeginIndex + FrameIndex) % m_FrameNodes.Count];
+	//}
+	FrameData GetFrameDateInLimit(int FrameIndex)
+	{
+		if (FrameIndex >= m_FrameNodes.Count)
+			return m_FrameNodes[(BeginIndex + m_FrameNodes.Count - 1) % m_FrameNodes.Count];
+
+		if (FrameIndex < 0)
+			return m_FrameNodes[BeginIndex % m_FrameNodes.Count];
+
+		return m_FrameNodes[(BeginIndex + FrameIndex) % m_FrameNodes.Count];
+	}
+
+	void UpdateMesh()
+	{
+		if (m_FrameNodes.Count <= 0)
+			return;
+
+		FrameData lastFrame, nextFrame, nextFrame1, nextFrame2;
+
+		for (int i = 0; i < m_NodeSmoothInfos.Count; ++i)
+		{
+			m_NodeSmoothInfos[i].PerLen = m_MeshSlice == 0 ? 0 : m_NodeSmoothInfos[i].TotalLength / m_MeshSlice;
+		}
+
+		for (int sliceIndex = 0; sliceIndex < m_MeshSlice; ++sliceIndex)
+		{
+			for (int nodeIndex = 0; nodeIndex < m_ControlNodeNum; ++nodeIndex)
+			{
+				var curSmoothInfo = m_NodeSmoothInfos[nodeIndex];
+
+				int i = (m_MeshSlice * nodeIndex + sliceIndex);
+
+				CurPer.x	= (float)	sliceIndex		/ (float)(m_MeshSlice - 1);
+				CurPer.y	= (float)	nodeIndex		/ (float)(m_ControlNodeNum - 1);
+
+				float curLen = curSmoothInfo.PerLen * sliceIndex;
+
+				while(true)
+				{
+					nextFrame = GetFrameDateInLimit(curSmoothInfo.NextIndex);
+					if (curSmoothInfo.PassLen + curLen < nextFrame.FrameNodeData[nodeIndex].LenToLastNode 
+						|| curSmoothInfo.NextIndex >= m_FrameNodes.Count)
+						break;
+
+					curSmoothInfo.PassLen += curSmoothInfo.PerLen;
+					++curSmoothInfo.NextIndex;
+				}
+
+				nextFrame1 = GetFrameDateInLimit(curSmoothInfo.NextIndex + 1);
+
+				nextFrame2 = GetFrameDateInLimit(curSmoothInfo.NextIndex + 2);
+
+				lastFrame = GetFrameDateInLimit(curSmoothInfo.NextIndex - 1);
+
+
+				float percent = curSmoothInfo.PerLen <= 0 ? 0.0f : (curLen - curSmoothInfo.PassLen) / curSmoothInfo.PerLen;
+
+				m_Vertices[i] = CatmulRom(	lastFrame.FrameNodeData[nodeIndex].Position, 
+											nextFrame.FrameNodeData[nodeIndex].Position, 
+											nextFrame1.FrameNodeData[nodeIndex].Position,
+											nextFrame2.FrameNodeData[nodeIndex].Position,
+											percent);
+
+				//m_Vertices[i] = nextFrame.FrameNodeData[nodeIndex].Position;
+
+				m_UVs[i] = CurPer;
+
+				m_Colors[i] = Color.white;
+
+			}
+		}
+
+		m_TrailMesh.SetVertices(m_Vertices);
+		m_TrailMesh.SetUVs(0, m_UVs);
+		m_TrailMesh.SetColors(m_Colors);
+		
+		if (IsCalNormal)
+			m_TrailMesh.RecalculateNormals();
+
+		m_TrailMesh.RecalculateBounds();
+
+		
+	}
+
+	public static Vector3 CatmulRom(Vector3 T0, Vector3 P0, Vector3 P1, Vector3 T1, float f)
+	{
+		double DT1 = -0.5;
+		double DT2 = 1.5;
+		double DT3 = -1.5;
+		double DT4 = 0.5;
+
+		double DE2 = -2.5;
+		double DE3 = 2;
+		double DE4 = -0.5;
+
+		double DV1 = -0.5;
+		double DV3 = 0.5;
+
+		double FAX = DT1 * T0.x + DT2 * P0.x + DT3 * P1.x + DT4 * T1.x;
+		double FBX = T0.x + DE2 * P0.x + DE3 * P1.x + DE4 * T1.x;
+		double FCX = DV1 * T0.x + DV3 * P1.x;
+		double FDX = P0.x;
+
+		double FAY = DT1 * T0.y + DT2 * P0.y + DT3 * P1.y + DT4 * T1.y;
+		double FBY = T0.y + DE2 * P0.y + DE3 * P1.y + DE4 * T1.y;
+		double FCY = DV1 * T0.y + DV3 * P1.y;
+		double FDY = P0.y;
+
+		double FAZ = DT1 * T0.z + DT2 * P0.z + DT3 * P1.z + DT4 * T1.z;
+		double FBZ = T0.z + DE2 * P0.z + DE3 * P1.z + DE4 * T1.z;
+		double FCZ = DV1 * T0.z + DV3 * P1.z;
+		double FDZ = P0.z;
+
+		float FX = (float)(((FAX * f + FBX) * f + FCX) * f + FDX);
+		float FY = (float)(((FAY * f + FBY) * f + FCY) * f + FDY);
+		float FZ = (float)(((FAZ * f + FBZ) * f + FCZ) * f + FDZ);
+
+		return new Vector3(FX, FY, FZ);
+	}
+}

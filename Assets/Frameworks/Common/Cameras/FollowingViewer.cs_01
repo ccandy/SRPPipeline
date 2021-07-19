@@ -1,0 +1,67 @@
+using UnityEngine;
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace Frameworks.Common
+{
+	public class FollowingViewer : MonoBehaviour
+	{
+		public GameObject	FollowObj = null;
+
+		public Camera		FollowCamera = null;
+
+		public Vector2		FollowXYOffset = Vector2.left;
+		public float		FollowDistance = 1.0f;
+
+		public Vector3		FollowPos	 = Vector3.zero;
+
+		public float		HorizontalAngle = 0.0f;
+
+		public float		VerticalAngle	= 0.0f;
+
+		Vector3 FollowTargetPos = Vector3.zero;
+
+		public Vector3 FollowVelocity	= Vector3.one;
+		public float FollowAngleSpeed	= 1.0f;
+
+		Quaternion TargetRotation = Quaternion.identity;
+
+		public void UpdatePosition(float deltaTime)
+		{
+			if (FollowObj != null)
+			{
+				FollowPos = FollowObj.transform.position;
+			}
+
+			TargetRotation = Quaternion.Euler(VerticalAngle, HorizontalAngle, 0);
+
+			Vector3 curOffset = TargetRotation * (Vector3.back * FollowDistance) + (Vector3)FollowXYOffset;
+
+			FollowTargetPos =  FollowPos + curOffset;
+
+			Vector3 curPos			= transform.position;
+			Quaternion curRotation	= transform.rotation;
+
+			var xOffset = Mathf.Abs(FollowTargetPos.x - curPos.x);
+			var yOffset = Mathf.Abs(FollowTargetPos.y - curPos.y);
+			var zOffset = Mathf.Abs(FollowTargetPos.z - curPos.z);
+
+			curPos.x = xOffset < FollowVelocity.x * deltaTime ? FollowTargetPos.x : Mathf.Lerp(curPos.x, FollowTargetPos.x, FollowVelocity.x * deltaTime / xOffset);
+			curPos.y = yOffset < FollowVelocity.y * deltaTime ? FollowTargetPos.y : Mathf.Lerp(curPos.y, FollowTargetPos.y, FollowVelocity.y * deltaTime / yOffset);
+			curPos.z = zOffset < FollowVelocity.z * deltaTime ? FollowTargetPos.z : Mathf.Lerp(curPos.z, FollowTargetPos.z, FollowVelocity.z * deltaTime / zOffset);
+
+			float angleOffset = Quaternion.Angle( curRotation, TargetRotation);
+
+			curRotation = angleOffset < FollowAngleSpeed * deltaTime ? TargetRotation : Quaternion.Lerp(curRotation, TargetRotation, FollowAngleSpeed * deltaTime / angleOffset);
+
+
+			transform.SetPositionAndRotation( curPos, curRotation);
+		}
+
+		private void Update()
+		{
+			UpdatePosition(Time.deltaTime);
+		}
+	}
+}

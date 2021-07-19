@@ -1,0 +1,643 @@
+﻿using Frameworks.Common;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Frameworks.Asset
+{
+	public class BundleData
+	{
+		/// <summary>
+		/// Using for GC all useless bundle.
+		/// </summary>
+		public bool IsUseless = false;
+
+		/// <summary>
+		/// bundle Path, begin with asset/...
+		/// </summary>
+		public string BundlePath = "";
+
+		public AssetBundle Bundle = null;
+
+		public string[] DependBundlePathes = null;
+
+#if RESTORE_ASSET_IN_TABLE
+		Dictionary<string, Dictionary<Type, UnityEngine.Object>> loadedAsset = new Dictionary<string, Dictionary<Type, UnityEngine.Object>>();
+#endif
+
+		public T GetAsset<T>(string assetName) where T : UnityEngine.Object
+		{
+			if (Bundle == null)
+				return null;
+
+#if RESTORE_ASSET_IN_TABLE
+			Dictionary<Type, UnityEngine.Object> typeTable = null;
+			if (!loadedAsset.TryGetValue(assetName, out typeTable))
+			{
+				typeTable = new Dictionary<Type, UnityEngine.Object>();
+				loadedAsset.Add(assetName, typeTable);
+			}
+
+			UnityEngine.Object rt = null;
+
+			Type t = typeof(T);
+
+			if (typeTable.TryGetValue(t, out rt))
+			{
+				return rt as T;
+			}
+
+			UnityEngine.Object rt = null;
+			rt = Bundle.LoadAsset<T>(assetName);
+			typeTable.Add(t, rt);
+
+			return rt as T;
+#else
+			return Bundle.LoadAsset<T>(assetName);
+#endif
+		}
+	}
+
+	public class AssetManager : SingletonMonoBehaviour<AssetManager>
+	{
+		/// <summary>
+		/// 是否使用 assetBundle 资源，在编辑模式下，建议该值改为 false
+		/// </summary>
+#if UNITY_EDITOR
+#if TEST_RESOURCE
+		public static readonly bool USE_ASSET_BUNDLE = true;
+#else
+		public static readonly bool USE_ASSET_BUNDLE = false;
+#endif
+#else
+		public static readonly bool USE_ASSET_BUNDLE = true;
+#endif
+
+		string HotPatchingBasePath = "";
+
+		Pool<BundleData> m_GlobeBundleTable		= new Pool<BundleData>();
+		Pool<BundleData> m_DirectlyBundleTable	= new Pool<BundleData>();
+
+		bool m_IsLoading = false;
+
+		/// <summary>
+		/// Globe Asset Bundle Manifest. Using it to get the bundles dependent bundle.
+		/// </summary>
+		AssetBundleManifest mGlobeAssetBundleManifest = null;
+
+		public static string ResBasePath = "";
+
+		public static string PlatformPath = "";
+		public static string GlobeManifestName = "";
+
+		public static string ResRealPath = "";
+
+		public static string HotPatchingPath = "";
+
+		public static string GlobeManifestPath = "";
+
+		public static string HotPatchingGlobeManifestPath = "";
+		bool IsHotPatchingRes = false;
+
+		public void InitResourcePath(string basePath = null)
+		{
+			
+			if ( string.IsNullOrEmpty(basePath) )
+			{
+				basePath = Application.streamingAssetsPath;
+			}
+
+			ResBasePath = basePath;
+
+#if UNITY_STANDALONE_WIN
+			PlatformPath = "Assetbundles/StandaloneWindows";
+			GlobeManifestName = "StandaloneWindows";
+#elif UNITY_ANDROID
+			PlatformPath = "Assetbundles/Android";
+			GlobeManifestName = "Android";
+#elif UNITY_IPHONE || UNITY_STANDALONE_OSX
+			PlatformPath = "Assetbundles/Ios";
+			GlobeManifestName = "Ios";
+#endif
+			ResRealPath					= string.Format("{0}/{1}", ResBasePath, PlatformPath);
+
+			GlobeManifestPath			= string.Format("{0}/{1}", ResRealPath, GlobeManifestName);
+
+			HotPatchingBasePath			= string.Format("{0}/{1}", HotPatchingBasePath, PlatformPath);
+
+			HotPatchingGlobeManifestPath = string.Format("{0}/{1}", HotPatchingBasePath, GlobeManifestName);
+		}
+
+		public void BuildDependBundleList(string bundlePath, ref List<string> includeDependBundleList)
+		{
+			bundlePath = ToBundlePath(bundlePath);
+		}
+
+		public static string ToBundlePath(string bundlePath)
+		{
+			string rt = bundlePath.ToLower();
+			rt.Replace("\\", "/");
+			return rt;
+		}
+
+		public static string bundlePathToAbsPath(string bundlePath)
+		{
+			string rt = string.Format("{0}/{1}", ResRealPath, bundlePath);
+			return rt;
+		}
+
+		public bool LoadBaseManifest()
+		{
+			if (!USE_ASSET_BUNDLE)
+				return true;
+
+			AssetBundle Bundle = null;
+
+			if ( System.IO.File.Exists(HotPatchingGlobeManifestPath) )
+			{
+				Bundle = AssetBundle.LoadFromFile(HotPatchingGlobeManifestPath);
+				IsHotPatchingRes = Bundle != null;
+			}
+
+			if (Bundle == null)
+			{
+				Bundle = AssetBundle.LoadFromFile(GlobeManifestPath);
+			}
+				
+			if (Bundle == null)
+				return false;
+
+			mGlobeAssetBundleManifest = Bundle.LoadAsset<AssetBundleManifest>("AssetBundleManifest");
+			return mGlobeAssetBundleManifest == null;
+		}
+
+		public T LoadAsset<T>(string path) where T : UnityEngine.Object
+		{
+			if (string.IsNullOrEmpty(path))
+				return null;
+
+#if UNITY_EDITOR
+			if (!USE_ASSET_BUNDLE)
+			{
+				return UnityEditor.AssetDatabase.LoadAssetAtPath<T>(path);
+			}
+#endif
+
+			T rt = null;
+
+			var bundlePath = ToBundlePath(path);
+
+			var lastLineIndex = bundlePath.LastIndexOf('/');
+
+			if (lastLineIndex == -1)
+				return null;
+
+			bundlePath = bundlePath.Substring(0, lastLineIndex);
+
+			var bundleData = m_GlobeBundleTable.GetObject(bundlePath);
+
+			if (bundleData == null)
+			{
+				Debug.LogWarningFormat("Loading Asset: {0} Warning! Bundle File:{1} is not loaded before!", path, bundlePath);
+				LoadBundleImmediate(bundlePath);
+				bundleData = m_GlobeBundleTable.GetObject(bundlePath);
+			}
+
+			if (bundleData == null)
+			{
+				Debug.LogErrorFormat("Loading Asset: {0} Failed! Bundle File:{1} is not exsited!", path, bundlePath);
+				return rt;
+			}
+
+			rt = bundleData.GetAsset<T>(path);
+
+			return rt;
+		}
+
+		public void LoadAssetAnyc<T>(string path, bool isDirectlyBundle, OnLoadedAssetCallbackFunc<T> onloadedFunc) where T : UnityEngine.Object
+		{
+			if (string.IsNullOrEmpty(path))
+				return;
+
+			var bundlePath = ToBundlePath(path);
+
+			var lastLineIndex = bundlePath.LastIndexOf('/');
+
+			if (lastLineIndex == -1)
+				return;
+
+			var bundleData = m_GlobeBundleTable.GetObject(bundlePath);
+
+			bundlePath = bundlePath.Substring(0, lastLineIndex);
+
+			if (bundleData == null)
+			{
+				LoadBundle(bundlePath, isDirectlyBundle, (data)=> 
+										{
+											T loadedAsset = data.GetAsset<T>(path);
+
+											if (onloadedFunc != null)
+												onloadedFunc(loadedAsset);
+										});
+			}
+
+			T _loadedAsset = bundleData.GetAsset<T>(path);
+
+			if (onloadedFunc != null)
+				onloadedFunc(_loadedAsset);
+		}
+
+		public static bool CheckBundleIsLoad(string bundleKey)
+		{
+			if (Instance == null)
+				return false;
+
+			string key = ToBundlePath(bundleKey);
+
+			return Instance.m_GlobeBundleTable.GetObject(bundleKey) != null;
+		}
+
+		public static void BuildincludedDependentBundleTable(ref List<string> includedDependentPreloadBundle, string path)
+		{
+			if (Instance == null)
+			{
+				Debug.LogError("BuildLoadingQueue Failed! AssetManager is not Instantiated!");
+				return;
+			}
+
+			if (includedDependentPreloadBundle.Contains(path))
+				return;
+
+			string bundlePath = string.Format("{0}.bundle", path);
+			string[] dependencies = Instance.mGlobeAssetBundleManifest.GetAllDependencies(bundlePath);
+
+			for (int i = 0; i < dependencies.Length; ++i)
+			{
+				string dependenciesPath = dependencies[i].Substring(0, dependencies[i].Length - 7/*".bundle".Length*/ );
+
+				if (includedDependentPreloadBundle.Contains(dependenciesPath))
+					continue;
+
+				if (AssetManager.CheckBundleIsLoad(dependenciesPath))
+					continue;
+
+				includedDependentPreloadBundle.Add(dependenciesPath);
+			}
+
+			includedDependentPreloadBundle.Add(path);
+		}
+
+		public delegate void OnLoadingCallbackFunc(int curLoaded, int total);
+
+		public delegate void OnLoadedCallbackFunc(BundleData data);
+
+		public delegate void OnLoadedAssetCallbackFunc<T>(T asset);
+
+		public void LoadBundleImmediate(string bundlePath)
+		{
+			List<string> includedDependentPreloadBundle = new List<string>();
+
+			BuildincludedDependentBundleTable(ref includedDependentPreloadBundle, bundlePath);
+
+			for (int i = 0; i < includedDependentPreloadBundle.Count; ++i)
+			{
+				AssetBundle dependentBundle = null;
+				var path = includedDependentPreloadBundle[i];
+
+				string hotPatchingPath = string.Format("{0}/{1}.bundle", HotPatchingPath, path);
+
+				if (System.IO.File.Exists(hotPatchingPath))
+				{
+					dependentBundle = AssetBundle.LoadFromFile(hotPatchingPath);
+				}
+				else
+				{
+					dependentBundle = AssetBundle.LoadFromFile(string.Format("{0}/{1}.bundle", ResRealPath, path));
+				}
+
+				if (dependentBundle == null)
+				{
+					continue;
+				}
+
+				var dependentBundleData = new BundleData();
+
+				dependentBundleData.Bundle = dependentBundle;
+				dependentBundleData.BundlePath = path;
+				dependentBundleData.DependBundlePathes = mGlobeAssetBundleManifest.GetAllDependencies(path + ".bundle");
+
+				m_GlobeBundleTable.AddObject( path, dependentBundleData);
+			}
+		}
+
+		public void LoadBundle(string bundlePath, bool isDirectlyBundle = true, OnLoadedCallbackFunc loadedFunc = null, OnLoadingCallbackFunc loadingFunc = null)
+		{
+#if UNITY_EDITOR
+			if (!USE_ASSET_BUNDLE)
+			{
+				if (loadingFunc != null)
+					loadingFunc(1, 1);
+
+				if (loadedFunc != null)
+					loadedFunc(null);
+			}
+#endif
+			var availableBundleData = m_GlobeBundleTable.GetObject(bundlePath);
+			if (availableBundleData != null)
+			{
+				if (isDirectlyBundle)
+				{
+					if (m_DirectlyBundleTable.GetIndex(bundlePath) == -1)
+					{
+						m_DirectlyBundleTable.AddObject(bundlePath, availableBundleData);
+					}
+				}
+
+				if (loadingFunc != null)
+				{
+					loadingFunc(1, 1);
+				}
+
+				if (loadedFunc != null)
+				{
+					loadedFunc(availableBundleData);
+				}
+				return;
+			}
+
+			StartCoroutine(LoadBundleCoroutine(bundlePath, isDirectlyBundle, loadedFunc, loadingFunc));
+		}
+
+		IEnumerator LoadBundleCoroutine(string bundlePath, bool isDirectlyBundle = true, OnLoadedCallbackFunc loadedFunc = null, OnLoadingCallbackFunc loadingFunc = null)
+		{
+			if (m_IsLoading)
+			{
+				yield return null;
+			}
+
+			m_IsLoading = true;
+
+			List<string> includedDependentPreloadBundle = new List<string>();
+
+			BuildincludedDependentBundleTable(ref includedDependentPreloadBundle, bundlePath);
+
+			for (int i = 0; i < includedDependentPreloadBundle.Count; ++i)
+			{
+				var path = includedDependentPreloadBundle[i];
+
+				if (m_GlobeBundleTable.lookForTable.ContainsKey(path))
+					continue;
+
+				string hotPatchingPath = string.Format("{0}/{1}.bundle", HotPatchingPath, path);
+
+				AssetBundleCreateRequest request = null;
+
+				if (System.IO.File.Exists(hotPatchingPath))
+				{
+					request = AssetBundle.LoadFromFileAsync(hotPatchingPath);
+				}
+				else
+				{
+					request = AssetBundle.LoadFromFileAsync(string.Format("{0}/{1}.bundle", ResRealPath, path));
+				}
+
+				yield return request;
+
+				try
+				{
+					if (loadingFunc != null)
+						loadingFunc(i, includedDependentPreloadBundle.Count);
+				}
+				catch (Exception ex)
+				{
+					Debug.LogErrorFormat("Bundle callback exception: {0} stack:{1}", ex.Message, ex.StackTrace);
+				}
+
+				var dependentBundle = request.assetBundle;
+
+				if (dependentBundle == null)
+				{
+					Debug.LogErrorFormat("Loading bundle error: {0} loaded failed!", path);
+					continue;
+				}
+
+				var dependentBundleData = new BundleData();
+
+				dependentBundleData.Bundle = dependentBundle;
+				dependentBundleData.BundlePath = path;
+				dependentBundleData.DependBundlePathes = mGlobeAssetBundleManifest.GetAllDependencies(path + ".bundle");
+
+				m_GlobeBundleTable.AddObject(path, dependentBundleData);
+
+				if (path.CompareTo(bundlePath) == 0 && isDirectlyBundle)
+				{
+					m_DirectlyBundleTable.AddObject(path, dependentBundleData);
+				}
+			}
+
+			try
+			{
+				if (loadedFunc != null)
+					loadedFunc(m_GlobeBundleTable.GetObject(bundlePath));
+			}
+			catch (Exception ex)
+			{
+				Debug.LogErrorFormat("Bundle callback exception: {0} stack:{1}", ex.Message, ex.StackTrace);
+			}
+			
+			m_IsLoading = false;
+		}
+
+		public void LoadBundle(List<string> bundlePathes, bool isDirectlyBundle = true, OnLoadedCallbackFunc loadedFunc = null, OnLoadingCallbackFunc loadingFunc = null)
+		{
+#if UNITY_EDITOR
+			if (!USE_ASSET_BUNDLE)
+			{
+				if (loadingFunc != null)
+					loadingFunc(1, 1);
+
+				if (loadedFunc != null)
+					loadedFunc(null);
+			}
+#endif
+			StartCoroutine(LoadBundleCoroutine(bundlePathes, isDirectlyBundle, loadedFunc, loadingFunc));
+		}
+
+		IEnumerator LoadBundleCoroutine(List<string> bundlePathes, bool isDirectlyBundle = true, OnLoadedCallbackFunc loadedFunc = null, OnLoadingCallbackFunc loadingFunc = null)
+		{
+			if (m_IsLoading)
+			{
+				yield return null;
+			}
+
+			m_IsLoading = true;
+
+			List<string> includedDependentPreloadBundle = new List<string>();
+
+			for (int i = 0; i < bundlePathes.Count; ++i)
+			{
+				BuildincludedDependentBundleTable(ref includedDependentPreloadBundle, bundlePathes[i]);
+			}
+
+			for (int i = 0; i < includedDependentPreloadBundle.Count; ++i)
+			{
+				var path = includedDependentPreloadBundle[i];
+
+				if (m_GlobeBundleTable.lookForTable.ContainsKey(path))
+				{
+					try
+					{
+						if (loadingFunc != null)
+							loadingFunc(i, includedDependentPreloadBundle.Count);
+					}
+					catch (Exception ex)
+					{
+						Debug.LogErrorFormat("Bundle callback exception: {0} stack:{1}", ex.Message, ex.StackTrace);
+					}
+					continue;
+				}
+
+				string hotPatchingPath = string.Format("{0}/{1}.bundle", HotPatchingPath, path);
+
+				AssetBundleCreateRequest request = null;
+
+				if (System.IO.File.Exists(hotPatchingPath))
+				{
+					request = AssetBundle.LoadFromFileAsync(hotPatchingPath);
+				}
+				else
+				{
+					request = AssetBundle.LoadFromFileAsync(string.Format("{0}/{1}.bundle", ResRealPath, path));
+				}				
+
+				yield return request;
+
+				try
+				{
+					if (loadingFunc != null)
+						loadingFunc(i, includedDependentPreloadBundle.Count);
+				}
+				catch (Exception ex)
+				{
+					Debug.LogErrorFormat("Bundle callback exception: {0} stack:{1}", ex.Message, ex.StackTrace);
+				}
+
+				var dependentBundle = request.assetBundle;
+
+				if (dependentBundle == null)
+				{
+					Debug.LogErrorFormat("Loading bundle error: {0} loaded failed!", path);
+					continue;
+				}
+
+				var dependentBundleData = new BundleData();
+
+				dependentBundleData.Bundle = dependentBundle;
+				dependentBundleData.BundlePath = path;
+				dependentBundleData.DependBundlePathes = mGlobeAssetBundleManifest.GetAllDependencies(path + ".bundle");
+
+				m_GlobeBundleTable.AddObject(path, dependentBundleData);
+
+				if (bundlePathes.Exists( str=> { return str.CompareTo(path) == 0; }) && isDirectlyBundle)
+				{
+					m_DirectlyBundleTable.AddObject(path, dependentBundleData);
+				}
+			}
+
+			try
+			{
+				if (loadedFunc != null)
+				{
+					for (int i = 0; i < bundlePathes.Count; ++i)
+					{
+						loadedFunc(m_GlobeBundleTable.GetObject(bundlePathes[i]));
+
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Debug.LogErrorFormat("Bundle callback exception: {0} stack:{1}", ex.Message, ex.StackTrace);
+			}
+
+			m_IsLoading = false;
+		}
+
+		public void ClearDirectlyBundleList()
+		{
+			m_DirectlyBundleTable.Clear();
+		}
+
+		public static void RemoveUselessBundle()
+		{
+			if (Instance == null)
+				return;
+
+			var totalBundleList = Instance.m_GlobeBundleTable.pool;
+
+			var directlyBundleList = Instance.m_DirectlyBundleTable.pool;
+
+			for (int i = 0; i < totalBundleList.Count; ++i)
+			{
+				var bundleData = totalBundleList[i];
+
+				if (bundleData == null)
+					continue;
+
+				bundleData.IsUseless = true;
+			}
+
+			for (int i = 0; i < directlyBundleList.Count; ++i)
+			{
+				var bundleData = directlyBundleList[i];
+
+				if (bundleData == null)
+					continue;
+
+				bundleData.IsUseless = false;
+
+				var dependentList = bundleData.DependBundlePathes;
+
+				for (int j = 0; j < dependentList.Length; ++j)
+				{
+					string dependPath = dependentList[j];
+
+					if (dependPath.Length < ".bundle".Length)
+					{
+						continue;
+					}
+
+					var dependentData = Instance.m_GlobeBundleTable.GetObject(dependPath.Substring(0, dependPath.Length - ".bundle".Length));
+
+					if (dependentData == null)
+					{
+						Debug.LogWarningFormat("Remove bundle error. {0}'s bundle can't be found!", dependPath);
+						continue;
+					}
+
+					dependentData.IsUseless = false;
+				}
+			}
+
+			for (int i = 0; i < totalBundleList.Count; ++i)
+			{
+				var bundleData = totalBundleList[i];
+
+				if (bundleData == null)
+					continue;
+
+				if (bundleData.IsUseless)
+				{
+					bundleData.Bundle.Unload(false);
+					//bundleData.bundle = null;
+					Instance.m_GlobeBundleTable.RemoveObject(bundleData.BundlePath);
+				}
+			}
+
+			Resources.UnloadUnusedAssets();
+
+			GC.Collect();
+		}
+	}
+}

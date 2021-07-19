@@ -1,0 +1,42 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 465242a8b523c4f40b353d33d3f78ff1, type: 3}
+  m_Name: CustomRenderPipelineAsset
+  m_EditorClassIdentifier: 
+  SupportsHDR: 1
+  UseMSAA: 1
+  UseSRPBatcher: 1
+  SupportsDynamicBatching: 1
+  MixedLightingSupported: 1
+  MSAASampleCount: 1
+  RenderScale: 1
+  EnvironmentType: 1
+  GlobalCubeMap: {fileID: 8900000, guid: d87c9a7688a162142abb2b609a1b4d2b, type: 2}
+  CubeSH9:
+    SHParams:
+    - {x: -0.053432476, y: 0.18711366, z: 0.012407563, w: 0.5193626}
+    - {x: -0.059836376, y: 0.29217753, z: 0.01941179, w: 0.5236314}
+    - {x: -0.06624024, y: 0.43826625, z: 0.029818134, w: 0.48147458}
+    - {x: -0.18382342, y: -0.16380712, z: -0.01102959, w: 0.07557188}
+    - {x: -0.16993462, y: -0.12418294, z: 0.016850315, w: 0.08374178}
+    - {x: -0.1723856, y: -0.069444396, z: 0.046262067, w: 0.108251594}
+    - {x: 0.09252443, y: 0.07689951, z: 0.043811258, w: 1}
+  shadowType: 2
+  ShadowMapResolution: 2048
+  ShadowDistance: 93.3
+  ShadowCascadeCount: 4
+  CascadeSplits: {x: 0.067, y: 0.2, z: 0.467, w: 0}
+  ShadowDepthBias: 1
+  ShadowNormalBias: 1
+  renderPassBlockAssets:
+  - {fileID: 11400000, guid: 0a87c19de4f0ec34ea91711a9a1b1497, type: 2}
+  - {fileID: 11400000, guid: 59ee987e93e592048b6e6f869bb14d12, type: 2}
